@@ -61,6 +61,7 @@ nav.links a.active::after{content:'';position:absolute;left:0;right:0;bottom:-6p
 .btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(242,65,35,0.28);}
 .btn.ghost{background:transparent;color:var(--navy);border:1.5px solid var(--navy);}
 .btn.ghost:hover{background:var(--navy);color:#fff;box-shadow:none;}
+.mobile-cta{display:none;}
 .menu-toggle{display:none;background:none;border:none;cursor:pointer;padding:4px;}
 .menu-toggle span{display:block;width:24px;height:2px;background:var(--navy);margin:5px 0;}
 
@@ -210,7 +211,35 @@ footer.site{background:var(--navy);color:#fff;padding:64px 0 28px;}
 
 @media(max-width:900px){
   nav.links{display:none;}
-  .menu-toggle{display:block;}
+  .menu-toggle{display:block;flex:none;}
+  .nav{padding:14px 20px;gap:10px;}
+  .nav .btn:not(.menu-toggle){display:none;}
+  .brand{min-width:0;}
+  .brand-word{font-size:16px;white-space:nowrap;}
+  .brand-word .sub{white-space:nowrap;font-size:9px;letter-spacing:0.1em;}
+  .brand img{height:28px;}
+}
+@media(max-width:400px){
+  .brand-word .sub{display:none;}
+}
+nav.links.mobile-open{
+  display:flex;flex-direction:column;align-items:stretch;position:absolute;top:100%;left:0;right:0;
+  background:var(--paper);padding:20px;gap:4px;border-bottom:1px solid var(--line);
+  box-shadow:0 12px 24px rgba(2,26,59,0.08);
+}
+nav.links.mobile-open a{padding:12px 4px;border-bottom:1px solid var(--line);font-size:16px;}
+nav.links.mobile-open a:last-child{border-bottom:none;}
+nav.links.mobile-open .mobile-cta{
+  display:block;margin-top:10px;background:var(--orange);color:#fff;text-align:center;
+  padding:13px;border-radius:var(--radius);font-weight:600;border-bottom:none;
+}
+@media(max-width:480px){
+  .wa-float{width:50px;height:50px;right:16px;bottom:16px;}
+  .wa-float svg{width:22px;height:22px;}
+  .visit-info{padding:28px 22px;}
+  .hours-table tr{display:flex;flex-direction:column;padding:12px 0;gap:4px;}
+  .hours-table td{padding:0;}
+  .hours-table td:last-child{text-align:left;}
 }
 :focus-visible{outline:2px solid var(--orange);outline-offset:2px;}
 
@@ -228,6 +257,7 @@ footer.site{background:var(--navy);color:#fff;padding:64px 0 28px;}
       <a href="services.html">Services</a>
       <a href="about.html" class="active">Our Chiropractor</a>
       <a href="visit.html">Visit Us</a>
+      <a href="https://wa.me/60163621314" target="_blank" rel="noopener" class="mobile-cta">WhatsApp Us</a>
     </nav>
     <a class="btn" href="https://wa.me/60163621314" target="_blank" rel="noopener">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.79.47 3.47 1.29 4.94L2 22l5.29-1.39a9.9 9.9 0 0 0 4.75 1.21h.01c5.46 0 9.9-4.45 9.9-9.91C21.96 6.45 17.5 2 12.04 2Zm5.8 14.06c-.24.68-1.4 1.3-1.93 1.35-.5.05-1.06.24-3.6-.75-3.02-1.2-4.93-4.24-5.08-4.44-.15-.2-1.2-1.6-1.2-3.05 0-1.44.76-2.15 1.03-2.44.27-.29.6-.36.79-.36.2 0 .4 0 .57.01.18.01.42-.07.66.5.24.58.83 2 .9 2.14.07.15.12.32.02.51-.1.2-.15.32-.3.49-.15.17-.31.39-.44.52-.15.15-.3.31-.13.6.17.3.75 1.24 1.62 2 1.11.99 2.05 1.3 2.35 1.44.3.15.47.13.65-.08.18-.2.75-.87.95-1.17.2-.3.4-.24.66-.15.27.1 1.7.8 1.99.95.29.15.48.22.55.34.07.13.07.72-.17 1.4Z"/></svg>
@@ -347,9 +377,7 @@ footer.site{background:var(--navy);color:#fff;padding:64px 0 28px;}
 
 <script>
   document.querySelector('.menu-toggle').addEventListener('click', function(){
-    var links = document.querySelector('nav.links');
-    var open = links.style.display === 'flex';
-    links.style.cssText = open ? 'display:none;' : 'display:flex;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:#FBF9F6;padding:20px 32px;gap:18px;border-bottom:1px solid rgba(2,26,59,0.12);';
+    document.querySelector('nav.links').classList.toggle('mobile-open');
   });
 </script>
 </body>
