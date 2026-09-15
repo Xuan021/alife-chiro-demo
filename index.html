@@ -365,7 +365,7 @@ section{padding:74px 0;}
 .pj-tick[data-reached="1"] .pj-tick-dot{border-color:var(--orange);background:var(--orange);}
 .pj-tick-num{font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--ink-40);transition:color .3s ease;}
 .pj-tick[data-reached="1"] .pj-tick-num{color:var(--navy);}
-.pj-marker{display:none;position:absolute;left:-56px;top:0;align-items:center;gap:8px;will-change:transform;pointer-events:none;transition:transform .5s cubic-bezier(.16,1,.3,1);}
+.pj-marker{display:none;position:absolute;left:-56px;top:0;align-items:center;gap:8px;will-change:transform;pointer-events:none;transition:transform .5s cubic-bezier(.16,1,.3,1),opacity .3s ease;}
 .pj-marker-box{width:20px;height:20px;background:var(--orange);border-radius:3px;display:grid;place-items:center;color:#fff;flex:none;}
 .pj-marker-line{width:28px;height:1px;background:var(--orange);}
 
@@ -435,20 +435,23 @@ section{padding:74px 0;}
   .pj-icon--align .pj-icon-ring{opacity:.55;}
 }
 
-/* Any device with a real mouse gets the wheel-locked stepper (script), at ANY
-   window width — so this needs a FIXED, uniform step height regardless of
-   layout width: the section is genuinely pinned to the viewport here, and a
-   content-driven height would make the block's total height change as focus
-   moves, which visibly re-centers/jumps (the earlier centering bug). */
-@media(hover:hover) and (pointer:fine){
-  .patient-journey-section{padding:0;min-height:100vh;}
-  .pj-sticky{min-height:100vh;display:flex;align-items:flex-start;overflow:hidden;padding-top:calc(var(--header-h,80px) + 40px);}
+/* Both desktop (wheel) and mobile (touch) now use the locked stepper below,
+   so both need this FIXED, uniform step height regardless of device or
+   width — the section is genuinely pinned to the viewport during the
+   interaction, and a content-driven height would make the block's total
+   height change as focus moves, which visibly re-centers/jumps the frozen
+   viewport underneath a scroll-lock (the earlier centering bug). The
+   2-column synced rail further down is still desktop-only — a rail
+   pinned to the side doesn't make sense on a narrow phone screen — but the
+   pin/height mechanics here are not about pointer type, they're about the
+   interaction itself, so they apply everywhere. */
+.patient-journey-section{padding:0;min-height:100vh;}
+.pj-sticky{min-height:100vh;display:flex;align-items:flex-start;overflow:hidden;padding-top:calc(var(--header-h,80px) + 40px);}
 
-  .pj-step{height:80px;padding:16px 0 16px 46px;overflow:hidden;transition:height .55s cubic-bezier(.16,1,.3,1);}
-  .pj-step[data-active="1"]{height:410px;}
-  .pj-step-desc-wrap{display:block;opacity:0;transition:opacity .25s ease;}
-  .pj-step[data-active="1"] .pj-step-desc-wrap{opacity:1;transition:opacity .35s ease .18s;}
-}
+.pj-step{height:80px;padding:16px 0 16px 46px;overflow:hidden;transition:height .55s cubic-bezier(.16,1,.3,1);}
+.pj-step[data-active="1"]{height:410px;}
+.pj-step-desc-wrap{display:block;opacity:0;transition:opacity .25s ease;}
+.pj-step[data-active="1"] .pj-step-desc-wrap{opacity:1;transition:opacity .35s ease .18s;}
 
 /* Two-column layout only once there's real width for it: swap the inline
    per-step numbers for the full synced rail (marker, fill line, ticks). */
@@ -1372,18 +1375,43 @@ body.preloading{overflow:hidden;height:100vh;}
   // a narrow-but-mouse-driven window (e.g. a preview pane) still gets it.
   var isDesktop = window.matchMedia && matchMedia('(hover:hover) and (pointer:fine)').matches;
 
+  // The rail is CSS-grid-stretched to match whichever step is tallest right
+  // now (.pj-grid{align-items:stretch}), and a step's own height animates
+  // open/closed over .55s (.pj-step height transition) — so the ticks are
+  // physically sliding for that whole .55s, not just jumping once. Snapshotting
+  // the marker's target position a single time, right as the transition
+  // starts, freezes it at a position the ticks are about to slide away from;
+  // it only looked "right" again once the next real setStep() call took a
+  // fresh snapshot. Track it every frame for the duration of the transition
+  // instead of once.
+  var MARKER_TRACK_MS = 650;
+  var markerRAF = null;
+  function positionMarker(i){
+    if(!(marker && track && rail)) return;
+    var activeTick = ticks[i];
+    if(!activeTick) return;
+    var tr = activeTick.getBoundingClientRect();
+    var rr = rail.getBoundingClientRect();
+    var top = (tr.top - rr.top) + tr.height/2;
+    marker.style.transform = 'translateY('+top.toFixed(1)+'px)';
+  }
+  function trackMarker(i){
+    if(markerRAF) cancelAnimationFrame(markerRAF);
+    var start = performance.now();
+    (function frame(now){
+      positionMarker(i);
+      if(now - start < MARKER_TRACK_MS){ markerRAF = requestAnimationFrame(frame); }
+      else { markerRAF = null; }
+    })(start);
+  }
+
   function setStep(i){
     steps.forEach(function(s, idx){ s.setAttribute('data-active', idx===i ? '1' : '0'); });
     ticks.forEach(function(t, idx){ t.setAttribute('data-reached', idx<=i ? '1' : '0'); });
     if(fill) fill.style.height = (i/(N-1)*100).toFixed(1)+'%';
     if(marker && track && rail){
-      var activeTick = ticks[i];
-      if(activeTick){
-        var tr = activeTick.getBoundingClientRect();
-        var rr = rail.getBoundingClientRect();
-        var top = (tr.top - rr.top) + tr.height/2;
-        marker.style.transform = 'translateY('+top.toFixed(1)+'px)';
-      }
+      marker.style.opacity = '1';
+      trackMarker(i);
     }
   }
 
@@ -1395,52 +1423,63 @@ body.preloading{overflow:hidden;height:100vh;}
     return;
   }
 
-  if(!isDesktop){
-    // Mobile / touch: same "one step in focus" visual as desktop, but driven by
-    // plain scroll position (whichever step sits nearest a fixed point in the
-    // viewport) — no scroll interception at all, so native touch scrolling and
-    // momentum are completely untouched.
-    var pt = 0.38; // slightly above true center reads better while scrolling down a list
-    function updateMobileActive(){
-      var vh = window.innerHeight;
-      var focusY = vh * pt;
-      var bestIdx = 0, bestDist = Infinity;
-      steps.forEach(function(s, i){
-        var r = s.getBoundingClientRect();
-        var mid = r.top + r.height/2;
-        var d = Math.abs(mid - focusY);
-        if(d < bestDist){ bestDist = d; bestIdx = i; }
-      });
-      setStep(bestIdx);
-    }
-    var ticking = false;
-    function onScroll(){
-      if(ticking) return;
-      ticking = true;
-      requestAnimationFrame(function(){ updateMobileActive(); ticking = false; });
-    }
-    window.addEventListener('scroll', onScroll, {passive:true});
-    window.addEventListener('resize', onScroll);
-    updateMobileActive();
-    return;
-  }
-
-  // ---- Desktop: scroll-locked stepper. Scrolling into the section snaps it to
-  // fill the viewport; each further scroll "tick" advances exactly one step
-  // instead of scrubbing continuously, so fast scrolling can't outrun the
-  // animation. Scrolling past step 1 (up) or step 4 (down) releases the lock
-  // and hands scrolling back to the page. ----
+  // ---- Shared locked-stepper core. Both the desktop wheel-lock and the
+  // mobile touch-lock further down drive this SAME state machine — only how
+  // "one deliberate scroll" is measured (a wheel notch vs. a touch drag
+  // distance) differs between the two branches at the bottom of this file.
+  //
+  // Entering the section from either edge always lands on a neutral stop
+  // FIRST — rail visible, nothing expanded — before any real step gets to
+  // activate. `paused` marks that stop; it's gated by the same animating-
+  // lock as every other transition below, so it's a real stop, not a
+  // pass-through a fast scroll/swipe can clear in one motion. `pauseDir`
+  // remembers which edge you came in from: continuing that SAME direction
+  // engages the first real step (0 from the top, N-1 from the bottom).
+  // stepIndex uses -1 / N as sentinels for this state — never a real step
+  // index. Reversing while paused is deliberately just ignored rather than
+  // treated as "back out" — real scroll/touch input commonly wobbles the
+  // other way for a moment as it decelerates, and reacting to that used to
+  // drop the lock and immediately re-satisfy the entry check on the very
+  // next input, reading as "stuck in a loop."
   var stepIndex = 0;
   var engaged = false;
+  var paused = false;
+  var pauseDir = 0;
   var animating = false;
-  var wheelAccum = 0;
-  var THRESHOLD = 70;
+  var accum = 0;
+  var THRESHOLD; // set below by whichever branch (wheel or touch) actually runs
   var ANIM_MS = 600;
 
-  setStep(0);
+  // Neutral rest state from the start — NOT setStep(0). Step 0 used to be
+  // pre-expanded by default before the user ever touched the section, so
+  // the very first down-entry visibly collapsed it (to the neutral pause)
+  // and then immediately re-expanded it a moment later — a pointless
+  // flash. Starting neutral means entry never has to undo something that
+  // was already open.
+  neutralRail();
+
+  function collapseAll(){
+    steps.forEach(function(s){ s.setAttribute('data-active','0'); });
+    // The rail height shrinks once nothing is active (it was stretched to match
+    // whichever step was expanded), so the marker's last computed position no
+    // longer corresponds to anything real — hide it rather than leave it
+    // pointing at a coordinate on a rail that's no longer that tall.
+    if(marker) marker.style.opacity = '0';
+    if(markerRAF){ cancelAnimationFrame(markerRAF); markerRAF = null; }
+  }
+
+  function neutralRail(){
+    // Same idea as collapseAll, but for the pause stop: nothing has been
+    // reached yet (or un-reached, from the bottom) rather than whatever the
+    // ticks/fill were left showing from a previous pass through the section.
+    steps.forEach(function(s){ s.setAttribute('data-active','0'); });
+    ticks.forEach(function(t){ t.setAttribute('data-reached','0'); });
+    if(fill) fill.style.height = '0%';
+    if(marker) marker.style.opacity = '0';
+    if(markerRAF){ cancelAnimationFrame(markerRAF); markerRAF = null; }
+  }
 
   function goStep(next){
-    if(next < 0 || next >= N){ disengage(); return; }
     animating = true;
     stepIndex = next;
     setStep(stepIndex);
@@ -1449,33 +1488,74 @@ body.preloading{overflow:hidden;height:100vh;}
 
   function disengage(){
     engaged = false;
-    wheelAccum = 0;
+    paused = false;
+    accum = 0;
   }
 
-  function onWheel(e){
-    if(engaged){
-      // At either end, release the moment the user scrolls the "exit" direction —
-      // no threshold to fight, and this event's own scroll isn't eaten, so the
-      // page starts moving again immediately instead of needing an extra nudge.
-      if(stepIndex === 0 && e.deltaY < 0){ disengage(); return; }
-      if(stepIndex === N-1 && e.deltaY > 0){ disengage(); return; }
+  function enterPaused(dir){
+    engaged = true;
+    paused = true;
+    pauseDir = dir;
+    stepIndex = dir > 0 ? -1 : N;
+    neutralRail();
+    animating = true;
+    window.setTimeout(function(){ animating = false; }, ANIM_MS);
+  }
 
+  // deltaY follows wheel convention: positive = scrolling down, negative =
+  // scrolling up. e just needs a preventDefault() method — the wheel and
+  // touchmove handlers below both pass their own native event straight
+  // through.
+  function handleDelta(deltaY, e){
+    if(engaged && paused){
+      if(animating){ e.preventDefault(); return; }
+      if((pauseDir > 0 && deltaY > 0) || (pauseDir < 0 && deltaY < 0)){
+        accum += deltaY;
+        if(accum > THRESHOLD || accum < -THRESHOLD){
+          accum = 0;
+          paused = false;
+          goStep(pauseDir > 0 ? 0 : N-1);
+        }
+      }
       e.preventDefault();
-      if(animating) return;
-      wheelAccum += e.deltaY;
-      if(wheelAccum > THRESHOLD){ wheelAccum = 0; goStep(stepIndex+1); }
-      else if(wheelAccum < -THRESHOLD){ wheelAccum = 0; goStep(stepIndex-1); }
+      return;
+    }
+
+    if(engaged){
+      if(animating){ e.preventDefault(); return; }
+      // Uniform threshold for every transition, including the first/last step —
+      // no special "release on the very first tick" case. That instant-release
+      // was actually the cause of the blinking: a single physical gesture fires
+      // many small delta events, so the tail end of the same gesture that just
+      // landed you on step 1 or step 4 was enough to immediately kick you back
+      // out again. Requiring the same deliberate scroll-past-threshold to leave
+      // as to advance makes the lock feel solid instead of twitchy.
+      accum += deltaY;
+      if(accum > THRESHOLD || accum < -THRESHOLD){
+        var dir2 = accum > THRESHOLD ? 1 : -1;
+        accum = 0;
+        var next = stepIndex + dir2;
+        if(next < 0 || next >= N){
+          // Exiting: collapse everything (step 4 shouldn't stay hanging open once
+          // you've scrolled past it) and let THIS event's scroll happen natively
+          // instead of eating it — the page needs to actually move away from the
+          // boundary, or the very next tick would instantly satisfy the re-entry
+          // check again and re-trap you right back where you left.
+          collapseAll();
+          disengage();
+          return;
+        }
+        e.preventDefault();
+        goStep(next);
+        return;
+      }
+      e.preventDefault();
       return;
     }
 
     var rect = section.getBoundingClientRect();
     var vh = window.innerHeight;
 
-    // Re-engage checks are position-gated (not just direction), so that scrolling
-    // up right after exiting through the TOP (rect.top still small) can't be
-    // mistaken for "approaching the bottom edge from below" (which needs rect.top
-    // to still be large, i.e. the section mostly hasn't entered yet) — that mix-up
-    // was what re-trapped the scroll instead of releasing it.
     // Re-engage checks are position-gated (not just direction), so that exiting
     // through one edge can't be mistaken for genuinely approaching the *other*
     // edge from outside. Down-entry requires rect.top to still be non-negative
@@ -1484,19 +1564,78 @@ body.preloading{overflow:hidden;height:100vh;}
     // entered from below yet — true approach from below). Without both of these
     // being tight in the correct direction, exiting one edge re-traps you by
     // satisfying the other edge's entry check a moment later.
-    if(e.deltaY > 0 && rect.top >= -1 && rect.top <= vh*0.5 && rect.bottom >= vh*0.5){
-      engaged = true; stepIndex = 0; setStep(0);
+    // Down-entry excludes "already deeply passed" (rect.top very negative) so a
+    // bottom-exit moment ago can't immediately re-trigger this one.
+    if(deltaY > 0 && rect.top >= -1 && rect.top <= vh*0.5 && rect.bottom >= vh*0.5){
       window.scrollBy({top: rect.top, behavior:'auto'});
+      enterPaused(1);
       e.preventDefault();
-    } else if(e.deltaY < 0 && rect.top >= vh*0.4 && rect.bottom >= vh*0.5 && rect.bottom < (rect.height + vh*0.5)){
-      engaged = true; stepIndex = N-1; setStep(N-1);
+    // Up-entry: allow either "genuinely approaching from far below" (rect.top
+    // still large — hasn't started entering) OR "already scrolled past the top
+    // at some point" (rect.top negative — covers coming back from just below,
+    // not only from deep inside a later section). The one range excluded on
+    // purpose is small-POSITIVE rect.top, which is specifically the residue of
+    // having just exited through the TOP boundary — allowing that range back in
+    // is what caused the earlier "can't leave upward" bug, so it stays excluded.
+    } else if(deltaY < 0 && (rect.top < 0 || rect.top >= vh*0.35) && rect.bottom >= vh*0.5 && rect.bottom < (rect.height + vh*0.5)){
       window.scrollBy({top: rect.bottom - vh, behavior:'auto'});
+      enterPaused(-1);
       e.preventDefault();
     }
   }
 
+  if(!isDesktop){
+    // ---- Mobile / touch: same locked, one-step-per-input stepper as
+    // desktop, just driven by touch drag distance instead of wheel notches.
+    // Native touch scrolling has no discrete "notches" at all — one
+    // continuous swipe can easily cover several steps' worth of distance in
+    // well under a second, which read as the whole rail flashing open and
+    // closed as you blew straight through it. THRESHOLD here is
+    // deliberately much bigger than the wheel's — on the order of several
+    // ordinary scroll gestures (similar to how other locked-scroll sites,
+    // e.g. Bruleen, require a handful of scroll ticks per step) — so one
+    // step needs a real, sustained swipe, not a light nudge. Tune this
+    // number directly if it still feels too loose or too stiff on a real
+    // phone; there's no way to feel that out from here.
+    THRESHOLD = 220;
+    var touchLastY = null;
+
+    function onTouchStart(e){
+      touchLastY = e.touches[0].clientY;
+    }
+    function onTouchMove(e){
+      if(touchLastY === null) return;
+      var y = e.touches[0].clientY;
+      // Finger moving UP the screen means the content should scroll DOWN —
+      // that's the same sign convention as wheel deltaY.
+      var deltaY = touchLastY - y;
+      touchLastY = y;
+      handleDelta(deltaY, e);
+    }
+    function onTouchEnd(){
+      touchLastY = null;
+    }
+
+    window.addEventListener('touchstart', onTouchStart, {passive:true});
+    window.addEventListener('touchmove', onTouchMove, {passive:false});
+    window.addEventListener('touchend', onTouchEnd, {passive:true});
+    window.addEventListener('resize', function(){ if(engaged && !paused) setStep(stepIndex); });
+    return;
+  }
+
+  // ---- Desktop: wheel-locked stepper. Scrolling into the section snaps it
+  // to fill the viewport; each further scroll "tick" advances exactly one
+  // step instead of scrubbing continuously, so fast scrolling can't outrun
+  // the animation. Scrolling past step 1 (up) or step 4 (down) releases the
+  // lock and hands scrolling back to the page. ----
+  THRESHOLD = 70;
+
+  function onWheel(e){
+    handleDelta(e.deltaY, e);
+  }
+
   window.addEventListener('wheel', onWheel, {passive:false});
-  window.addEventListener('resize', function(){ if(engaged) setStep(stepIndex); });
+  window.addEventListener('resize', function(){ if(engaged && !paused) setStep(stepIndex); });
 })();
 </script>
 <script>
