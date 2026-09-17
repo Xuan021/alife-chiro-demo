@@ -1143,16 +1143,33 @@ body.preloading{overflow:hidden;height:100vh;}
     overflow:hidden;
     box-shadow:0 8px 30px rgba(28,43,69,.12);
     background:linear-gradient(180deg,#fbf8f2,var(--c3d-cream));
+    display:flex;
+    flex-direction:column;
   }
-  .ch3d-canvas-holder{position:relative;width:100%;padding-top:52%;}
-  .ch3d-canvas-holder canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;}
+  .ch3d-canvas-holder{position:relative;width:100%;padding-top:52%;flex-shrink:0;}
+  .ch3d-canvas-holder canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none;}
   .ch3d-canvas-holder canvas:active{cursor:grabbing;}
+
+  /* Mobile (default, up to 640px): the 3D model sits on top and the photo
+     card flows in normal document flow directly beneath it, inside the same
+     stage. It is never an overlay on this tier, so it can't cover the model
+     or eat the tap that's meant to rotate it. */
+  .ch3d-reveal{
+    position:relative;
+    width:100%;
+    background:var(--c3d-panel);
+    border-radius:0;
+    box-shadow:none;
+    border-top:1px solid rgba(28,43,69,.1);
+    overflow:hidden;
+    z-index:5;
+  }
 
   /* Desktop: the model gets its own smaller, contained box inside the stage,
      leaving a side column (within the same outer stage) for the photo card
      so the two never overlap. */
   @media (min-width:641px){
-    .ch3d-stage{height:440px;}
+    .ch3d-stage{height:440px;display:block;}
     .ch3d-canvas-holder{
       position:absolute;
       width:auto;padding-top:0;
@@ -1161,6 +1178,13 @@ body.preloading{overflow:hidden;height:100vh;}
       overflow:hidden;
       background:rgba(255,255,255,.4);
       box-shadow:inset 0 0 0 1px rgba(28,43,69,.08);
+    }
+    .ch3d-reveal{
+      position:absolute;left:16px;top:16px;
+      width:300px;
+      border-radius:14px;
+      box-shadow:0 10px 34px rgba(28,43,69,.22);
+      border-top:none;
     }
   }
 
@@ -1182,20 +1206,6 @@ body.preloading{overflow:hidden;height:100vh;}
   }
   .ch3d-reset-btn:hover{background:#fff;border-color:rgba(28,43,69,.35);}
 
-  .ch3d-reveal{
-    background:var(--c3d-panel);
-    border-radius:14px;
-    box-shadow:0 10px 34px rgba(28,43,69,.22);
-    width:300px;
-    overflow:hidden;
-    z-index:5;
-  }
-  .ch3d-reveal.ch3d-anchored{position:absolute;left:16px;top:16px;}
-  .ch3d-reveal.ch3d-sheet{
-    position:fixed;left:0;right:0;bottom:0;width:auto;
-    border-radius:16px 16px 0 0;
-    max-height:70vh;
-  }
   .ch3d-reveal img{width:100%;display:block;max-height:300px;object-fit:cover;}
   .ch3d-reveal .ch3d-body{padding:12px 16px 16px;position:relative;}
   .ch3d-reveal .ch3d-caption{font-size:14px;font-weight:500;color:var(--c3d-navy);margin:0;}
@@ -1964,18 +1974,15 @@ body.preloading{overflow:hidden;height:100vh;}
   }
 
   // Opening the actual photo is a deliberate click/tap, so it's never driven
-  // by hover and never has to reposition itself as you orbit — it just sits
-  // in a fixed corner of the stage (see .ch3d-reveal.ch3d-anchored in CSS).
+  // by hover. Where it sits (anchored corner card on desktop, stacked below
+  // the model on mobile) is handled entirely by CSS — see the ch3d-reveal
+  // rules and their min-width:641px override above.
   function showZone(group) {
     const d = DATA[group.userData.zone];
     revealImg.src = d.src;
     revealImg.alt = d.caption;
     revealCaption.textContent = d.caption;
     reveal.hidden = false;
-
-    const wide = canHover && window.innerWidth > 640;
-    reveal.classList.toggle('ch3d-anchored', wide);
-    reveal.classList.toggle('ch3d-sheet', !wide);
   }
 
   function hideReveal() { reveal.hidden = true; }
@@ -2021,8 +2028,36 @@ body.preloading{overflow:hidden;height:100vh;}
     setHighlight(null);
     renderer.domElement.style.cursor = 'grab';
   });
+
+  // Desktop/mouse: a plain click reliably fires only once the full
+  // pointerdown → pointerup cycle (and OrbitControls' own drag bookkeeping)
+  // has resolved, so it's used as-is here — this is exactly how it worked
+  // before, and it's still the most reliable signal for a mouse.
   renderer.domElement.addEventListener('click', (e) => {
     if (dragging) return;
+    pointerNDC(e);
+    const zg = raycastZone();
+    if (zg) showZone(zg);
+  });
+
+  // Touch/pen: OrbitControls calls preventDefault() on touch pointerdown,
+  // which stops the browser from ever firing the synthetic 'click' that a
+  // tap would normally generate — so touches need their own detection.
+  // This deliberately does NOT read the `dragging` flag above: OrbitControls
+  // adds its own pointerup listener dynamically, from inside its pointerdown
+  // handler, which registers it *after* this script's own listeners — so by
+  // the time this handler runs, `dragging` isn't reliably reset yet. Raw
+  // movement/duration from the stored down-coordinates sidesteps that
+  // ordering problem entirely.
+  let downX = 0, downY = 0, downAt = 0, downType = '';
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    downX = e.clientX; downY = e.clientY; downAt = performance.now(); downType = e.pointerType;
+  });
+  renderer.domElement.addEventListener('pointerup', (e) => {
+    if (downType !== 'touch' && downType !== 'pen') return;
+    const movedFar = Math.hypot(e.clientX - downX, e.clientY - downY) > 10;
+    const heldLong = performance.now() - downAt > 600;
+    if (movedFar || heldLong) return;
     pointerNDC(e);
     const zg = raycastZone();
     if (zg) showZone(zg);
