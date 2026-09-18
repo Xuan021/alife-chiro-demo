@@ -1,0 +1,43 @@
+name: Update chiropractic news feed
+
+on:
+  schedule:
+    # Twice a day, spread out to avoid GitHub's busy top-of-hour queue.
+    # Times are UTC. 01:11 UTC / 13:11 UTC ≈ 9:11am / 9:11pm in Malaysia (UTC+8).
+    - cron: "11 1,13 * * *"
+  workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab
+
+permissions:
+  contents: write   # needed so the workflow can commit news.json back to the repo
+
+jobs:
+  update-news:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Fetch latest news
+        env:
+          GNEWS_API_KEY: ${{ secrets.GNEWS_API_KEY }}
+        run: python3 scripts/fetch_news.py
+
+      - name: Commit and push news.json if it changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- news.json; then
+            echo "news.json unchanged — nothing to commit."
+          else
+            git add news.json
+            git commit -m "Update news feed"
+            git push
+          fi
