@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 
 import requests
 
-# ---- Config -----------------------------------------------------------
+# ---- Config ------------------------------------------------------------
 QUERY = 'chiropractic OR "spinal health" OR "back pain" OR "spine health"'
 LANG = "en"
 MAX_ARTICLES = 6          # keep in sync with faq.html's news-card-grid (slice(0,6))
