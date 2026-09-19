@@ -21,6 +21,7 @@ Local test:
 
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -30,17 +31,46 @@ import requests
 QUERY = 'chiropractic OR "spinal health" OR "back pain" OR "spine health"'
 LANG = "en"
 MAX_ARTICLES = 6          # keep in sync with faq.html's news-card-grid (slice(0,6))
+FETCH_MAX = 15            # over-fetch from the API so filtering still leaves enough
 SUMMARY_MAX_LEN = 180      # keeps card text a consistent length
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "..", "news.json")
 API_URL = "https://gnews.io/api/v4/search"
+
+# Words/phrases that mark an article as unsuitable for the clinic's site
+# (broad news queries like "back pain" occasionally pull in unrelated adult
+# content). Matched case-insensitively against title + summary. Single words
+# are matched on whole-word boundaries so "sex" doesn't flag "Sussex" or
+# "unisex"; multi-word phrases are matched as plain substrings.
+SENSITIVE_KEYWORDS = [
+    "sex", "sexual", "sexually", "porn", "pornographic", "nude", "nudity",
+    "naked", "orgasm", "erotic", "erotica", "affair", "adultery",
+    "prostitut", "fetish", "onlyfans", "xxx", "kink", "bdsm", "incest",
+    "rape", "molest", "explicit content", "strip club", "sex worker",
+    "sex tape", "sex scandal",
+]
 # -------------------------------------------------------------------------
+
+
+def contains_sensitive_content(*texts: str) -> bool:
+    """Return True if any text contains a blocked keyword/phrase."""
+    combined = " ".join(t for t in texts if t).lower()
+    if not combined:
+        return False
+    for kw in SENSITIVE_KEYWORDS:
+        if " " in kw:
+            if kw in combined:
+                return True
+        else:
+            if re.search(rf"\b{re.escape(kw)}\b", combined):
+                return True
+    return False
 
 
 def fetch_articles(api_key: str) -> list[dict]:
     params = {
         "q": QUERY,
         "lang": LANG,
-        "max": MAX_ARTICLES,
+        "max": FETCH_MAX,
         "sortby": "publishedAt",
         "apikey": api_key,
     }
@@ -52,7 +82,12 @@ def fetch_articles(api_key: str) -> list[dict]:
 
 def to_news_json(articles: list[dict]) -> list[dict]:
     items = []
-    for a in articles[:MAX_ARTICLES]:
+    skipped_sensitive = 0
+
+    for a in articles:
+        if len(items) >= MAX_ARTICLES:
+            break
+
         title = (a.get("title") or "").strip()
         url = (a.get("url") or "").strip()
         if not title or not url:
@@ -67,6 +102,13 @@ def to_news_json(articles: list[dict]) -> list[dict]:
             date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         summary = (a.get("description") or a.get("content") or "").strip()
+
+        # Filter out anything that matches a sensitive keyword in the title
+        # or summary before it ever reaches the site.
+        if contains_sensitive_content(title, summary):
+            skipped_sensitive += 1
+            continue
+
         if len(summary) > SUMMARY_MAX_LEN:
             summary = summary[:SUMMARY_MAX_LEN].rsplit(" ", 1)[0] + "..."
 
@@ -77,6 +119,10 @@ def to_news_json(articles: list[dict]) -> list[dict]:
             "summary": summary,
             "url": url,
         })
+
+    if skipped_sensitive:
+        print(f"INFO: filtered out {skipped_sensitive} article(s) matching sensitive-content keywords.", file=sys.stderr)
+
     return items
 
 
@@ -96,8 +142,9 @@ def main() -> int:
 
     if not items:
         # Don't overwrite a good news.json with an empty one just because
-        # this run found nothing (e.g. a transient API hiccup or an empty
-        # result set) — leave the existing file in place.
+        # this run found nothing (e.g. a transient API hiccup, an empty
+        # result set, or everything got filtered as sensitive) — leave the
+        # existing file in place.
         print("WARNING: no usable articles returned; leaving news.json unchanged.", file=sys.stderr)
         return 0
 
